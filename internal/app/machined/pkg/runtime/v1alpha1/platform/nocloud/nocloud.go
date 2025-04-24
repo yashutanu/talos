@@ -99,6 +99,9 @@ func (n *Nocloud) Configuration(ctx context.Context, r state.State) ([]byte, err
 	if bytes.HasPrefix(machineConfigDl, []byte("#cloud-config")) {
 		return nil, errors.ErrNoConfigSource
 	}
+	if bytes.HasPrefix(machineConfigDl, []byte("#include")) {
+		return n.fromInclude(ctx, machineConfigDl, r)
+	}
 
 	return machineConfigDl, nil
 }
