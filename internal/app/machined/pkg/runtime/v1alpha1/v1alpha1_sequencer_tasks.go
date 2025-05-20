@@ -53,8 +53,6 @@ import (
 	"github.com/siderolabs/talos/internal/pkg/logind"
 	mountv2 "github.com/siderolabs/talos/internal/pkg/mount/v2"
 	"github.com/siderolabs/talos/internal/pkg/partition"
-	"github.com/siderolabs/talos/internal/pkg/secureboot"
-	"github.com/siderolabs/talos/internal/pkg/secureboot/tpm2"
 	"github.com/siderolabs/talos/internal/pkg/selinux"
 	"github.com/siderolabs/talos/pkg/conditions"
 	"github.com/siderolabs/talos/pkg/images"
@@ -211,12 +209,22 @@ func DiskSizeCheck(runtime.Sequence, any) (runtime.TaskExecutionFunc, string) {
 			return nil
 		}
 
-		ephemeralStatus, err := waitForVolumeReady(ctx, r, constants.EphemeralPartitionLabel)
+		volumeStatus, err := r.State().V1Alpha2().Resources().WatchFor(ctx,
+			blockres.NewVolumeStatus(blockres.NamespaceName, constants.EphemeralPartitionLabel).Metadata(),
+			state.WithCondition(func(r resource.Resource) (bool, error) {
+				volumeStatus, ok := r.(*blockres.VolumeStatus)
+				if !ok {
+					return false, nil
+				}
+
+				return volumeStatus.TypedSpec().Size > 0, nil
+			}),
+		)
 		if err != nil {
-			return err
+			return fmt.Errorf("error waiting for volume %q to be discovered: %w", constants.EphemeralPartitionLabel, err)
 		}
 
-		diskSize := ephemeralStatus.TypedSpec().Size
+		diskSize := volumeStatus.(*blockres.VolumeStatus).TypedSpec().Size
 
 		if minimum := minimal.DiskSize(); diskSize < minimum {
 			logger.Println("WARNING: disk size is less than recommended")
@@ -310,10 +318,6 @@ func WriteUdevRules(runtime.Sequence, any) (runtime.TaskExecutionFunc, string) {
 // StartMachined represents the task to start machined.
 func StartMachined(_ runtime.Sequence, _ any) (runtime.TaskExecutionFunc, string) {
 	return func(ctx context.Context, logger *log.Logger, r runtime.Runtime) error {
-		if err := tpm2.PCRExtend(constants.UKIPCR, []byte(secureboot.EnterMachined)); err != nil {
-			return err
-		}
-
 		svc := &services.Machined{}
 
 		id := svc.ID(r)
@@ -400,13 +404,6 @@ func StartUdevd(runtime.Sequence, any) (runtime.TaskExecutionFunc, string) {
 
 		return system.WaitForService(system.StateEventUp, svc.ID(r)).Wait(ctx)
 	}, "startUdevd"
-}
-
-// ExtendPCRStartAll represents the task to extend the PCR with the StartTheWorld PCR phase.
-func ExtendPCRStartAll(runtime.Sequence, any) (runtime.TaskExecutionFunc, string) {
-	return func(ctx context.Context, logger *log.Logger, r runtime.Runtime) (err error) {
-		return tpm2.PCRExtend(constants.UKIPCR, []byte(secureboot.StartTheWorld))
-	}, "extendPCRStartAll"
 }
 
 // StartAllServices represents the task to start the system services.

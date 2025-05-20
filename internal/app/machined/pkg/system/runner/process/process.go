@@ -5,7 +5,6 @@
 package process
 
 import (
-	"cmp"
 	"fmt"
 	"io"
 	"io/fs"
@@ -92,15 +91,14 @@ func (p *processRunner) Close() error {
 }
 
 type commandWrapper struct {
-	launcher         *cap.Launcher
-	ctty             optional.Optional[int]
-	selinuxLabel     string
-	cgroupFile       *os.File
-	stdin            *os.File
-	stdout           *os.File
-	stderr           *os.File
-	afterStart       func()
-	afterTermination func() error
+	launcher     *cap.Launcher
+	ctty         optional.Optional[int]
+	selinuxLabel string
+	cgroupFile   *os.File
+	stdin        *os.File
+	stdout       *os.File
+	stderr       *os.File
+	afterStart   func()
 }
 
 func dropCaps(droppedCapabilities []string, launcher *cap.Launcher) error {
@@ -195,16 +193,16 @@ func (p *processRunner) build() (commandWrapper, error) {
 	launcher.Callback(beforeExecCallback)
 
 	// Setup logging.
-	w, err := p.opts.LoggingManager.ServiceLog(p.args.ID).Writer()
+	logSink, err := p.opts.LoggingManager.ServiceLog(p.args.ID).Writer()
 	if err != nil {
 		return commandWrapper{}, fmt.Errorf("service log handler: %w", err)
 	}
 
-	var writer io.Writer
+	var logWriter io.Writer
 	if p.debug {
-		writer = io.MultiWriter(w, log.Writer())
+		logWriter = io.MultiWriter(logSink, log.Writer())
 	} else {
-		writer = w
+		logWriter = logSink
 	}
 
 	// As MultiWriter is not a file, we need to create a pipe
@@ -214,26 +212,29 @@ func (p *processRunner) build() (commandWrapper, error) {
 		return commandWrapper{}, err
 	}
 
-	go io.Copy(writer, pr) //nolint:errcheck
+	go func() {
+		defer pr.Close()      //nolint:errcheck
+		defer logSink.Close() //nolint:errcheck
+
+		io.Copy(logWriter, pr) //nolint:errcheck
+	}()
 
 	// close the writer if we exit early due to an error
 	closeWriter := true
 
-	closeLogging := func() (e error) {
-		for _, closer := range []io.Closer{w, pr, pw} {
-			e = cmp.Or(closer.Close(), e)
-		}
+	afterStartClosers := []io.Closer{pw}
 
-		return e
+	closeLogging := func() {
+		for _, closer := range afterStartClosers {
+			closer.Close() //nolint:errcheck
+		}
 	}
 
 	defer func() {
 		if closeWriter {
-			closeLogging() //nolint:errcheck
+			closeLogging()
 		}
 	}()
-
-	var afterStartClosers []io.Closer
 
 	if p.opts.StdinFile != "" {
 		stdin, err := os.Open(p.opts.StdinFile)
@@ -277,8 +278,7 @@ func (p *processRunner) build() (commandWrapper, error) {
 	closeWriter = false
 
 	wrapper.launcher = launcher
-	wrapper.afterStart = func() { xslices.Map(afterStartClosers, io.Closer.Close) }
-	wrapper.afterTermination = closeLogging
+	wrapper.afterStart = closeLogging
 	wrapper.ctty = p.opts.Ctty
 	wrapper.selinuxLabel = p.opts.SelinuxLabel
 
@@ -419,7 +419,7 @@ func (p *processRunner) run(eventSink events.Recorder) error {
 		return fmt.Errorf("error building command: %w", err)
 	}
 
-	defer cmdWrapper.afterTermination() //nolint:errcheck
+	defer cmdWrapper.afterStart()
 
 	notifyCh := make(chan reaper.ProcessInfo, 8)
 
@@ -479,7 +479,7 @@ func (p *processRunner) run(eventSink events.Recorder) error {
 	// wait for process to terminate
 	<-waitCh
 
-	return cmdWrapper.afterTermination()
+	return nil
 }
 
 func (p *processRunner) String() string {

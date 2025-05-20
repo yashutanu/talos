@@ -9,17 +9,16 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
+	"github.com/klauspost/compress/zstd"
 	"github.com/siderolabs/gen/xslices"
 	"github.com/siderolabs/go-cmd/pkg/cmd"
 	"github.com/siderolabs/go-procfs/procfs"
@@ -127,7 +126,7 @@ func (p *provisioner) createNode(state *vm.State, clusterReq provision.ClusterRe
 		nodeUUID = *nodeReq.UUID
 	}
 
-	apiPort, err := p.findBridgeListenPort(clusterReq)
+	apiBind, err := p.findAPIBindAddrs(clusterReq)
 	if err != nil {
 		return provision.NodeInfo{}, fmt.Errorf("error finding listen address for the API: %w", err)
 	}
@@ -169,7 +168,6 @@ func (p *provisioner) createNode(state *vm.State, clusterReq provision.ClusterRe
 		ExtraISOPath:      extraISOPath,
 		PFlashImages:      pflashImages,
 		MonitorPath:       state.GetRelativePath(fmt.Sprintf("%s.monitor", nodeReq.Name)),
-		EnableKVM:         opts.TargetArch == runtime.GOARCH,
 		BadRTC:            nodeReq.BadRTC,
 		DefaultBootOrder:  defaultBootOrder,
 		BootloaderEnabled: opts.BootloaderEnabled,
@@ -186,7 +184,7 @@ func (p *provisioner) createNode(state *vm.State, clusterReq provision.ClusterRe
 		Nameservers:       clusterReq.Network.Nameservers,
 		TFTPServer:        nodeReq.TFTPServer,
 		IPXEBootFileName:  nodeReq.IPXEBootFilename,
-		APIPort:           apiPort,
+		APIBindAddress:    apiBind,
 		WithDebugShell:    opts.WithDebugShell,
 		IOMMUEnabled:      opts.IOMMUEnabled,
 	}
@@ -208,17 +206,17 @@ func (p *provisioner) createNode(state *vm.State, clusterReq provision.ClusterRe
 
 		IPs: nodeReq.IPs,
 
-		APIPort: apiPort,
+		APIPort: apiBind.Port,
 	}
 
-	if opts.TPM2Enabled {
-		tpm2, tpm2Err := p.createVirtualTPM2State(state, nodeReq.Name)
+	if opts.TPM1_2Enabled || opts.TPM2Enabled {
+		tpmConfig, tpm2Err := p.createVirtualTPMState(state, nodeReq.Name, opts.TPM2Enabled)
 		if tpm2Err != nil {
 			return provision.NodeInfo{}, tpm2Err
 		}
 
-		launchConfig.TPM2Config = tpm2
-		nodeInfo.TPM2StateDir = tpm2.StateDir
+		launchConfig.TPMConfig = tpmConfig
+		nodeInfo.TPMStateDir = tpmConfig.StateDir
 	}
 
 	if !clusterReq.Network.DHCPSkipHostname {
@@ -306,37 +304,47 @@ func (p *provisioner) createNodes(state *vm.State, clusterReq provision.ClusterR
 	return nodesInfo, multiErr.ErrorOrNil()
 }
 
-func (p *provisioner) findBridgeListenPort(clusterReq provision.ClusterRequest) (int, error) {
-	l, err := net.Listen("tcp", net.JoinHostPort(clusterReq.Network.GatewayAddrs[0].String(), "0"))
-	if err != nil {
-		return 0, err
-	}
-
-	port := l.Addr().(*net.TCPAddr).Port
-
-	return port, l.Close()
-}
-
 func (p *provisioner) populateSystemDisk(disks []string, clusterReq provision.ClusterRequest) error {
 	if len(disks) > 0 && clusterReq.DiskImagePath != "" {
-		disk, err := os.OpenFile(disks[0], os.O_RDWR, 0o755)
+		if err := p.handleOptionalZSTDDiskImage(disks[0], clusterReq.DiskImagePath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *provisioner) handleOptionalZSTDDiskImage(provisionerDisk, diskImagePath string) error {
+	image, err := os.Open(diskImagePath)
+	if err != nil {
+		return err
+	}
+
+	defer image.Close() //nolint:errcheck
+
+	disk, err := os.OpenFile(provisionerDisk, os.O_RDWR, 0o755)
+	if err != nil {
+		return err
+	}
+
+	defer disk.Close() //nolint:errcheck
+
+	if strings.HasSuffix(diskImagePath, ".zst") {
+		zstdReader, err := zstd.NewReader(image)
 		if err != nil {
 			return err
 		}
-		defer disk.Close() //nolint:errcheck
 
-		image, err := os.Open(clusterReq.DiskImagePath)
-		if err != nil {
-			return err
-		}
-		defer image.Close() //nolint:errcheck
+		defer zstdReader.Close() //nolint:errcheck
 
-		_, err = io.Copy(disk, image)
+		_, err = io.Copy(disk, zstdReader)
 
 		return err
 	}
 
-	return nil
+	_, err = io.Copy(disk, image)
+
+	return err
 }
 
 func (p *provisioner) createMetalConfigISO(state *vm.State, nodeName, config string) (string, error) {

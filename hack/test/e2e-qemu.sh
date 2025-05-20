@@ -106,8 +106,7 @@ case "${USE_DISK_IMAGE:-false}" in
   false)
     ;;
   *)
-    zstd -d < _out/metal-amd64.raw.zst > _out/metal-amd64.raw
-    QEMU_FLAGS+=("--disk-image-path=_out/metal-amd64.raw")
+    QEMU_FLAGS+=("--disk-image-path=_out/metal-amd64.raw.zst")
     ;;
 esac
 
@@ -188,6 +187,14 @@ case "${WITH_TRUSTED_BOOT_ISO:-false}" in
     ;;
 esac
 
+case "${WITH_TPM1_2:-false}" in
+  false)
+    ;;
+  *)
+    QEMU_FLAGS+=("--with-tpm1_2")
+    ;;
+esac
+
 case "${WITH_SIDEROLINK_AGENT:-false}" in
   false)
     ;;
@@ -260,6 +267,18 @@ case "${WITH_ENFORCING:-false}" in
     ;;
   *)
     QEMU_FLAGS+=("--extra-boot-kernel-args=enforcing=1")
+    ;;
+esac
+
+case "${WITH_AIRGAPPED:-false}" in
+  false)
+    ;;
+  *)
+    "${TALOSCTL}" debug air-gapped --advertised-address 172.20.1.1 >/tmp/airgapped.log 2>&1 &
+     sleep 5 # wait for the air-gapped server to start
+     mv air-gapped-patch.yaml /tmp/air-gapped-patch.yaml
+
+    QEMU_FLAGS+=("--config-patch=@/tmp/air-gapped-patch.yaml")
     ;;
 esac
 

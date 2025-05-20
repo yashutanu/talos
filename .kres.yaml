@@ -9,13 +9,14 @@ spec:
   config: |-
     creation_rules:
       - age: age1xrpa9ujxxcj2u2gzfrzv8mxak4rts94a6y60ypurv6rs5cpr4e4sg95f0k
-        # order: Andrey, Noel, Artem, Utku, Dmitriy
+        # order: Andrey, Noel, Artem, Utku, Tim, Andy
         pgp: >-
           15D5721F5F5BAF121495363EFE042E3D4085A811,
           CC51116A94490FA6FB3C18EB2401FCAE863A06CA,
           4919F560F0D35F80CF382D76E084A2DF1143C14D,
           11177A43C6E3752E682AC690DBD13117B0A14E93,
-          AA5213AF261C1977AF38B03A94B473337258BFD5
+          5D7964FF2DB426ACB3C3505AA2A702DD5B689F45,
+          E77ED9F8451E10BD242D07415444881046F92733
 ---
 kind: common.Repository
 spec:
@@ -29,7 +30,7 @@ spec:
     - kernel
     - security
     - ci
-    - ^v1.10
+    - ^v1.11
   licenseChecks:
     - skipPaths:
         - .git/
@@ -728,9 +729,21 @@ spec:
             PLATFORM: linux/amd64,linux/arm64
             IMAGE_REGISTRY: registry.dev.siderolabs.io
             PUSH: true
+        - name: uki-certs
+          environment:
+            PLATFORM: linux/amd64
+          conditions:
+            - only-on-schedule
         - name: talosctl-cni-bundle
           conditions:
             - only-on-schedule
+        - name: images-essential
+          conditions:
+            - only-on-schedule
+          environment:
+            PLATFORM: linux/amd64,linux/arm64
+            IMAGER_ARGS: "--extra-kernel-arg=console=ttyS0"
+            IMAGE_REGISTRY: registry.dev.siderolabs.io
         - name: provision-tests-prepare
         - name: provision-tests-track-0
           withSudo: true
@@ -969,6 +982,14 @@ spec:
         - name: talosctl-cni-bundle
           conditions:
             - only-on-schedule
+        - name: e2e-airgapped
+          command: e2e-qemu
+          withSudo: true
+          environment:
+            GITHUB_STEP_NAME: ${{ github.job}}-e2e-airgapped
+            SHORT_INTEGRATION_TEST: yes
+            WITH_AIRGAPPED: true
+            IMAGE_REGISTRY: registry.dev.siderolabs.io
         - name: e2e-no-cluster-discovery
           command: e2e-qemu
           withSudo: true
@@ -1015,6 +1036,7 @@ spec:
             artifactPath: /tmp/logs-*.tar.gz
             additionalArtifacts:
               - "/tmp/support-*.zip"
+              - "/tmp/airgapped*.log"
     - name: integration-misc-1-enforcing
       buildxOptions:
         enabled: true
@@ -1224,6 +1246,14 @@ spec:
             GITHUB_STEP_NAME: ${{ github.job}}-e2e-disk-image
             SHORT_INTEGRATION_TEST: yes
             WITH_CONFIG_PATCH: "@hack/test/patches/node-address-v2.yaml"
+            IMAGE_REGISTRY: registry.dev.siderolabs.io
+        - name: e2e-tpm1_2
+          command: e2e-qemu
+          withSudo: true
+          environment:
+            GITHUB_STEP_NAME: ${{ github.job}}-e2e-tpm1_2
+            SHORT_INTEGRATION_TEST: yes
+            WITH_TPM1_2: true
             IMAGE_REGISTRY: registry.dev.siderolabs.io
         - name: save-talos-logs
           conditions:

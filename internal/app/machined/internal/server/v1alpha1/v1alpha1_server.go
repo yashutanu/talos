@@ -180,6 +180,13 @@ func (s *Server) ApplyConfiguration(ctx context.Context, in *machine.ApplyConfig
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
+	// as we are not in maintenance mode, the v1alpha1 config should be always present
+	// in the future we should allow to remove v1alpha1, but for now for better UX we deny
+	// such requests to avoid confusion
+	if cfgProvider.RawV1Alpha1() == nil {
+		return nil, status.Error(codes.InvalidArgument, "the applied machine configuration doesn't contain v1alpha1 config, did you mean to patch the machine config instead?")
+	}
+
 	validationMode := modeWrapper{
 		Mode:      s.Controller.Runtime().State().Platform().Mode(),
 		installed: s.Controller.Runtime().State().Machine().Installed(),
@@ -652,8 +659,8 @@ func (s *Server) Reset(ctx context.Context, in *machine.ResetRequest) (reply *ma
 				return nil, fmt.Errorf("failed to get volume status with label %q: %w", spec.Label, err)
 			}
 
-			if volumeStatus.TypedSpec().Phase != block.VolumePhaseReady {
-				return nil, fmt.Errorf("failed to reset: volume %q is not ready", spec.Label)
+			if volumeStatus.TypedSpec().Location == "" {
+				return nil, fmt.Errorf("failed to reset: volume %q is not located", spec.Label)
 			}
 
 			target := partition.VolumeWipeTargetFromVolumeStatus(volumeStatus)

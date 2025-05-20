@@ -1,4 +1,4 @@
-# syntax = docker/dockerfile-upstream:1.14.1-labs
+# syntax = docker/dockerfile-upstream:1.15.1-labs
 
 # Meta args applied to stage base names.
 
@@ -38,7 +38,6 @@ ARG PKG_LIBLZMA=scratch
 ARG PKG_LIBMNL=scratch
 ARG PKG_LIBNFTNL=scratch
 ARG PKG_LIBPOPT=scratch
-ARG PKG_LIBSECCOMP=scratch
 ARG PKG_LIBSELINUX=scratch
 ARG PKG_LIBSEPOL=scratch
 ARG PKG_LIBURCU=scratch
@@ -139,9 +138,6 @@ FROM --platform=arm64 ${PKG_PCRE2} AS pkg-pcre2-arm64
 FROM --platform=amd64 ${PKG_OPENSSL} AS pkg-openssl-amd64
 FROM --platform=arm64 ${PKG_OPENSSL} AS pkg-openssl-arm64
 
-FROM --platform=amd64 ${PKG_LIBSECCOMP} AS pkg-libseccomp-amd64
-FROM --platform=arm64 ${PKG_LIBSECCOMP} AS pkg-libseccomp-arm64
-
 # linux-firmware is not arch-specific
 FROM --platform=amd64 ${PKG_LINUX_FIRMWARE} AS pkg-linux-firmware
 
@@ -160,6 +156,7 @@ FROM --platform=arm64 ${PKG_RUNC} AS pkg-runc-arm64
 FROM --platform=amd64 ${PKG_XFSPROGS} AS pkg-xfsprogs-amd64
 FROM --platform=arm64 ${PKG_XFSPROGS} AS pkg-xfsprogs-arm64
 
+FROM ${PKG_UTIL_LINUX} AS pkg-util-linux
 FROM --platform=amd64 ${PKG_UTIL_LINUX} AS pkg-util-linux-amd64
 FROM --platform=arm64 ${PKG_UTIL_LINUX} AS pkg-util-linux-arm64
 
@@ -737,7 +734,6 @@ COPY --link --from=pkg-libsepol-amd64 / /rootfs
 COPY --link --from=pkg-libselinux-amd64 / /rootfs
 COPY --link --from=pkg-pcre2-amd64 / /rootfs
 COPY --link --from=pkg-openssl-amd64 / /rootfs
-COPY --link --from=pkg-libseccomp-amd64 / /rootfs
 COPY --link --from=pkg-lvm2-amd64 / /rootfs
 COPY --link --from=pkg-libaio-amd64 / /rootfs
 COPY --link --from=pkg-musl-amd64 / /rootfs
@@ -815,7 +811,6 @@ COPY --link --from=pkg-libsepol-arm64 / /rootfs
 COPY --link --from=pkg-libselinux-arm64 / /rootfs
 COPY --link --from=pkg-pcre2-arm64 / /rootfs
 COPY --link --from=pkg-openssl-arm64 / /rootfs
-COPY --link --from=pkg-libseccomp-arm64 / /rootfs
 COPY --link --from=pkg-lvm2-arm64 / /rootfs
 COPY --link --from=pkg-libaio-arm64 / /rootfs
 COPY --link --from=pkg-musl-arm64 / /rootfs
@@ -984,14 +979,14 @@ ARG TARGETARCH
 ENV TARGETARCH=${TARGETARCH}
 COPY --link --from=pkg-fhs / /
 COPY --link --from=pkg-ca-certificates / /
-COPY --link --exclude=usr/include --from=pkg-musl / /
+COPY --link --exclude=**/*.a --exclude=**/*.la --exclude=usr/include --from=pkg-musl / /
 
 COPY --link --from=pkg-dosfstools / /
 COPY --link --exclude=etc/bash_completion.d --from=pkg-grub / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libattr / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libinih / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-liblzma / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-liburcu / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libattr / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libinih / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-liblzma / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-liburcu / /
 COPY --link --from=pkg-xfsprogs / /
 COPY --link --from=installer-image-gen /rootfs /
 
@@ -1007,24 +1002,26 @@ ENTRYPOINT ["/bin/installer"]
 
 FROM installer-base-image-squashed AS imager-image
 COPY --link --from=pkg-cpio / /
-COPY --link --exclude=usr/lib/pkgconfig --from=pkg-e2fsprogs / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-glib / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/lib/pkgconfig --from=pkg-e2fsprogs / /
+COPY --link --exclude=**/*.a --exclude=**/*.la --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-glib / /
 COPY --link --from=pkg-grub-amd64 /usr/lib/grub /usr/lib/grub
 COPY --link --from=pkg-grub-arm64 /usr/lib/grub /usr/lib/grub
 COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --exclude=usr/share/pkgconfig --exclude=usr/share/bash-completion --from=pkg-kmod / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libburn / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libisoburn / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libisofs / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libburn / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libisoburn / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-libisofs / /
 COPY --link --from=pkg-mtools / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --exclude=usr/lib/cmake --from=pkg-openssl / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-pcre2 / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --exclude=usr/lib/cmake --from=pkg-openssl / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-pcre2 / /
 COPY --link --from=pkg-pigz / /
 COPY --link --from=pkg-qemu-tools / /
 COPY --link --from=pkg-squashfs-tools / /
 COPY --link --from=pkg-tar / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-xz / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-zlib / /
-COPY --link --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-zstd / /
+COPY --link --exclude=**/*.a --exclude=*.a --from=pkg-util-linux /usr/lib/libblkid.* /usr/lib/
+COPY --link --exclude=**/*.a --exclude=*.a --from=pkg-util-linux-amd64 /usr/lib/libuuid.* /usr/lib/
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-xz / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-zlib / /
+COPY --link --exclude=**/*.a --exclude=**/*.la  --exclude=usr/include --exclude=usr/lib/pkgconfig --from=pkg-zstd / /
 COPY --chmod=0644 hack/extra-modules.conf /etc/modules.d/10-extra-modules.conf
 COPY --from=install-artifacts / /
 
@@ -1235,10 +1232,10 @@ RUN protoc \
     /protos/time/*.proto
 
 FROM scratch AS docs
-COPY --from=docs-build /tmp/configuration/ /website/content/v1.10/reference/configuration/
-COPY --from=docs-build /tmp/cli.md /website/content/v1.10/reference/
-COPY --from=docs-build /tmp/schemas /website/content/v1.10/schemas/
-COPY --from=proto-docs-build /tmp/api.md /website/content/v1.10/reference/
+COPY --from=docs-build /tmp/configuration/ /website/content/v1.11/reference/configuration/
+COPY --from=docs-build /tmp/cli.md /website/content/v1.11/reference/
+COPY --from=docs-build /tmp/schemas /website/content/v1.11/schemas/
+COPY --from=proto-docs-build /tmp/api.md /website/content/v1.11/reference/
 
 # The talosctl-cni-bundle builds the CNI bundle for talosctl.
 
